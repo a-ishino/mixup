@@ -8,6 +8,7 @@ import torch.backends.cudnn as cudnn
 import torchvision
 import torchvision.transforms as transforms
 
+import numpy as np
 import os
 import argparse
 
@@ -19,6 +20,7 @@ parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
+parser.add_argument('--mixup', action='store_true', help='use mixup')
 args = parser.parse_args()
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -54,7 +56,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer',
 
 # Model
 print('==> Building model..')
-# net = VGG('VGG19')
+net = VGG('VGG19')
 # net = ResNet18()
 # net = PreActResNet18()
 # net = GoogLeNet()
@@ -67,7 +69,7 @@ print('==> Building model..')
 # net = SENet18()
 # net = ShuffleNetV2(1)
 # net = EfficientNetB0()
-net = RegNetX_200MF()
+# net = RegNetX_200MF()
 net = net.to(device)
 if device == 'cuda':
     net = torch.nn.DataParallel(net)
@@ -86,7 +88,18 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr,
                       momentum=0.9, weight_decay=5e-4)
 
+# ↓ mixup
+def mixup_data(X, Y, alpha=1.0):
+    n_sample = len(X)
+    lam = np.random.beta(alpha, alpha)
+    index = torch.randperm(n_sample).to(device)
+    X_mix = lam * X + (1 - lam) * X[index]
+    return X_mix, Y, Y[index], lam
 
+def mixup_targets(out, Y_a, Y_b, lam, criterion):
+    return lam * criterion(out, Y_a) + (1 - lam) * criterion(out, Y_b)
+# ↑ mixup
+    
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -96,9 +109,22 @@ def train(epoch):
     total = 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
+        
+        # ↓ mixup
+        if args.mixup:
+            inputs, targets_a, targets_b, lam = mixup_data(inputs, targets)
+        # ↑ mixup
+        
         optimizer.zero_grad()
         outputs = net(inputs)
-        loss = criterion(outputs, targets)
+        
+        # ↓ mixup
+        if args.mixup:
+            loss = mixup_targets(outputs, targets_a, targets_b, lam, criterion)
+        else:
+            loss = criterion(outputs, targets)
+        # ↑ mixup
+        
         loss.backward()
         optimizer.step()
 
@@ -146,6 +172,9 @@ def test(epoch):
         best_acc = acc
 
 
-for epoch in range(start_epoch, start_epoch+200):
+# e = 200
+e = 10
+for epoch in range(start_epoch, start_epoch+e):
     train(epoch)
     test(epoch)
+# 94.14, 93.82
