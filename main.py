@@ -177,4 +177,3 @@ e = 10
 for epoch in range(start_epoch, start_epoch+e):
     train(epoch)
     test(epoch)
-# 94.14, 93.82
